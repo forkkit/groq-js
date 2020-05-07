@@ -28,12 +28,14 @@ function inMapper(value, fn) {
 }
 
 class Scope {
-  constructor(params, source, value, parent) {
+  constructor(params, source, value, parent, options) {
     this.params = params
     this.source = source
     this.value = value
     this.parent = parent
     this.timestamp = parent ? parent.timestamp : new Date().toISOString()
+    this.referenceMatcher =
+      (options && options.referenceMatcher) || (parent && parent.referenceMatcher)
   }
 
   createNested(value) {
@@ -246,6 +248,7 @@ const EXECUTORS = {
   },
 
   async Deref({base}, scope) {
+    const matchesDocument = scope.referenceMatcher || refMatchesDocument
     let baseValue = await execute(base, scope)
     return inMapper(baseValue, async baseValue => {
       if (scope.source.getType() != 'array') return NULL_VALUE
@@ -255,7 +258,7 @@ const EXECUTORS = {
       if (typeof id != 'string') return NULL_VALUE
 
       for await (let doc of scope.source) {
-        if (id === doc.data._id) {
+        if (matchesDocument(id, doc.data)) {
           return doc
         }
       }
@@ -417,6 +420,7 @@ const EXECUTORS = {
  * @param {object} [options.params]  Parameters availble in the GROQ query (using `$param` syntax).
  * @param [options.root] The value that will be available as `@` in GROQ.
  * @param [options.dataset] The value that will be available as `*` in GROQ.
+ * @param [options.referenceMatcher] Function called to check if a referenced document ID matches a given document
  * @return {Value}
  * @alias module:groq-js.evaluate
  */
@@ -429,8 +433,14 @@ async function evaluate(tree, options = {}) {
     Object.assign(params, options.params)
   }
 
-  let scope = new Scope(params, dataset, root, null)
+  let scope = new Scope(params, dataset, root, null, {
+    referenceMatcher: options.referenceMatcher || refMatchesDocument
+  })
   return await execute(tree, scope)
+}
+
+function refMatchesDocument(documentId, document) {
+  return document._id === documentId
 }
 
 exports.evaluate = evaluate
